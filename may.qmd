@@ -1,0 +1,143 @@
+---
+title: "May report"
+author: "René-Jubilé MABILA"
+format: html
+editor: visual
+params:
+  month : May
+---
+
+## Load libraries
+
+```{r}
+# install.packages(c("pacman", "rio")
+
+pacman::p_load(gstat, tidyverse, sf, sp)
+```
+
+## Load data
+
+```{r}
+data <- read.table(file = "data/Data_Example_1.txt", header = T, sep = "\t") %>% 
+  filter(month == params$month)
+```
+
+## Wrangling data
+
+```{r}
+data$sampleID <- as.numeric(data$sampleID)
+data$subplot <- as.numeric(data$subplot)
+data$OTU_all_taxa <- as.numeric(data$OTU_all_taxa)
+str(data)
+```
+
+## 1. Variogramme
+
+```{r}
+# compute undirected (isotropic) empirical semivariogram
+var1 <- variogram((log(OTU_all_taxa) * 10) ~ 1, ~x + y, cutoff = 8, width = 1, 
+                  alpha = 90, data = data)
+
+# create figure of empirical semivariogram
+plot(var1, plot.numbers = TRUE, xlab = "Distance", ylab = "Semivariance", cex = 1, cex.axis = 2)
+
+```
+
+```{r}
+# compute semivariogram model based on the empiral semivariogram 'var1'
+mod1 <- fit.variogram(var1, vgm(psill = NA, c("Exp", "Sph"), range = NA, 1), fit.sills = TRUE, fit.ranges = TRUE, fit.method = 1)
+
+mod1
+```
+
+```{r}
+# plot figure of semivariogram model
+plot(var1, plot.numbers = TRUE, model = mod1, xlab = "Distance", ylab = "Semivariance")
+```
+
+# 2. Kriging (or krigeage)
+
+```{r}
+
+# y-values of the corners
+y <- c(10, 10, 0, 0)
+# x-values of the corners
+x <- c(0, 10, 10, 0)
+# pdf(file = "xy_scatter_polygon_coordinates.pdf", width = 5, height = 5.5)
+# Scatterplot of the coordinates
+plot(x, y)
+```
+
+```{r}
+# adding a square with the coordinates defined by x and y
+#polygon(x, y, border = "red")
+```
+
+```{r}
+# create matrix from x and y coordinates of the corners
+xym <- cbind(x, y)
+xym
+```
+
+```{r}
+p <- Polygon(xym)
+
+# create list of Polygon object
+ps <- Polygons(list(p), 1)
+# create objects of class SpatialPolygons or SpatialPolygonsDataFrame from lists of Polygons objects and
+# data.frames
+sps <- SpatialPolygons(list(ps))
+#pdf(file = "polygon_with_prediction_points.pdf", width = 5, height = 5)
+# plot polygon frame
+plot(sps)
+```
+
+```{r}
+# show points for prediction locations within the polygon, using regular sampling methods, n = number of
+# sampling points, the higher the number of points for which predictions should be calculated, the
+# smoother is the projection
+
+#points(spsample(sps, n = 1000, "regular"), pch = 20)
+```
+
+```{r}
+# create a dataframe from prediction locations
+grid_x_y <- as.data.frame(spsample(sps, n = 15000, "regular"))
+# set column names to be identical on both datasets, the one containing the original measurement data and
+# the one conatinaing the prediction locations
+colnames(grid_x_y) <- c("x", "y")
+# specify the columns x and y as coordinates
+coordinates(grid_x_y) <- ~x + y
+```
+
+```{r}
+ggplot(data, aes(x, y)) +
+  geom_point(aes(size=OTU_all_taxa), color="blue", alpha=3/4) +
+  labs(x="m", y="m", title = NULL, subtitle = NULL, caption = NULL, tag = NULL,
+       size="\n \ntotal \nOTU richness") +
+  coord_equal() +
+  theme_bw()
+```
+
+```{r}
+#specify the columns x and y as coordinates
+coordinates(data) <- ~ x + y
+#kriging on the untransformed data of total OTU richness from sampling locations
+#in april and the 15000 locations used for interpolation should be done
+mod1.kriged <- krige((OTU_all_taxa) ~ 1, data, grid_x_y, model=mod1)
+## [using ordinary kriging]
+#write kriging file as dataframe for graphical display
+frame_mod1.kriged<-as.data.frame(mod1.kriged)
+```
+
+```{r}
+#create figure from kriging results
+# pdf(file="krig_april.pdf", width = 7, height = 5)
+ggplot(frame_mod1.kriged, aes(x=x, y=y)) +
+  geom_tile(aes(fill=var1.pred)) + coord_equal() +
+  scale_fill_distiller(palette = "Purples", limits=c(10,45), direction = 1)+
+  labs(x="m", y="m", title = NULL, subtitle = NULL, caption = NULL, tag = NULL,
+       fill="total \nOTU richness") +
+  annotate("text", label = params$month, x = 9, y = 10.5, color = "black")+
+  theme_classic()
+```
